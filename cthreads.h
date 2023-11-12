@@ -30,6 +30,7 @@ extern int Cthread_create(cthread_t *, const c_thread_attr *, void(*)(void), voi
 extern cthread_t cthread_self();
 
 extern int cthread_scheduler();
+extern void cthreads_run();
 
 extern void end_task();
 
@@ -49,4 +50,5 @@ extern int cthread_join(cthread_t, void **);
 extern void join_handler();
 
 extern void cthread_exit(void *);
+
 #endif

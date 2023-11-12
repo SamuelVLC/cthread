@@ -288,6 +288,11 @@ void end_task()
     setcontext(&scheduler_context);
 }
 
+void cthreads_run()
+{
+    cthread_scheduler();
+}
+
 cthread_t cthread_self()
 {
     return current_thread->id;
