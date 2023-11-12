@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "ctlist.h": "c",
+        "cthreads.h": "c",
+        "ucontext.h": "c",
+        "stdlib.h": "c"
+    }
+}
