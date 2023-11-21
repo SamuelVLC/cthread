@@ -34,6 +34,7 @@ void reorder();
 void yield_handler();
 void end_task();
 int cthread_scheduler();
+/*teste*/
 
 int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_task)(void), void *arg)
 {
