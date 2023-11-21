@@ -28,27 +28,10 @@ typedef struct c_thread {
 extern int Cthread_create(cthread_t *, const c_thread_attr *, void(*)(void), void *);
 
 extern cthread_t cthread_self();
-
-extern int cthread_scheduler();
 extern void cthreads_run();
-
-extern void end_task();
-
 extern void cthread_yield();
-extern void yield_handler();
-
-extern void switch_to();
-
 extern void print_list();
-
-extern void update_status();
-
-
-extern void scheduler_default();
-
 extern int cthread_join(cthread_t, void **);
-extern void join_handler();
-
 extern void cthread_exit(void *);
 
 #endif

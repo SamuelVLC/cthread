@@ -12,7 +12,6 @@ ucontext_t scheduler_context;
 ucontext_t task_end; /*Defines context to end a task*/
 c_thread *current_thread; /*Thread in Execution*/
 
-
 /**
  * Signal definitions
 */
@@ -26,6 +25,15 @@ int signals;
 */
 int YRFLAG; /*Scheduler flag to yield*/
 int JRFLAG; /*Scheduler flag to join*/
+
+/*Forward definitions*/
+void update_status();
+void scheduler_default();
+void join_handler();
+void reorder();
+void yield_handler();
+void end_task();
+int cthread_scheduler();
 
 int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_task)(void), void *arg)
 {
@@ -76,6 +84,7 @@ int cthread_scheduler()
     {
     case 1:
         signals = -1;
+        reorder();
         yield_handler();
         break;
     
@@ -118,35 +127,47 @@ void update_status()
 
 }
 
-/*
-void switch_to()
+void reorder()
 {
     print_list();
     struct c_thread_list *tmp = t_node;
+    struct c_thread_list *tmp2;
 
-    while (tmp->previous != NULL && tmp->thread != current_thread)
+    while (tmp->previous != t_node_first && tmp->thread != current_thread)
         tmp = tmp->previous;
     
-    if(tmp->previous != NULL && tmp != t_node)
+
+    if(t_node == t_node_first)
+        return;
+
+    if(tmp != t_node)
     {
-        
         tmp->next->previous = tmp->previous;
+        tmp->previous->next = tmp->next;
+        tmp->previous = tmp->next;
+        
+        tmp2 = tmp->next->next;
+        tmp->next->next = tmp;
+        tmp->next = tmp2;
+        
+    }
+    else
+    {
         tmp->previous->next = tmp->next;
         
         t_node_first->next->previous = tmp;
         tmp->previous = t_node_first;
-        t_node_first->next = tmp;
-    }
-    else
-    {
-        t_node_first->next->previous = tmp;
-        tmp->previous = t_node_first;
+        tmp->next = t_node_first->next;
         t_node_first->next = tmp;
     }
 
-    print_list();
+    tmp = t_node_first;
+
+    while(tmp->next != NULL)
+        tmp = tmp->next;
+
+    t_node = tmp;
 }
-*/
 
 /**
  * @brief yields the thread
