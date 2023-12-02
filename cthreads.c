@@ -1,12 +1,20 @@
 #include "cthreads.h"
 #include "ctlist.h"
 #include <stdio.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdbool.h>
+
+/**
+ * Constant definitions
+*/
+#define TJOIN_SIZE 1000
 
 /**
  * Global variable definitions
 */
 cthread_t tid = 0; /*Static thread ID Definition*/
-cthread_t tJoin = 0; /*Join handler global thread ID */
+int tJoin[TJOIN_SIZE];
 void **vJoin = NULL; /*Join handler global value_ptr*/
 ucontext_t scheduler_context;
 ucontext_t task_end; /*Defines context to end a task*/
@@ -24,17 +32,19 @@ int signals;
  * Flag definitions
 */
 int YRFLAG; /*Scheduler flag to yield*/
-int JRFLAG; /*Scheduler flag to join*/
+int JRFLAG[TJOIN_SIZE]; /*Scheduler flag to join*/
 
 /*Forward definitions*/
-void update_status();
-void scheduler_default();
+void schedule();
 void join_handler();
 void reorder();
 void yield_handler();
 void end_task();
 int cthread_scheduler();
-/*teste1232*/
+c_thread *find_thread(cthread_t, struct c_thread_list *);
+struct c_thread_list *IsBlocking(cthread_t );
+void unblock_threads(struct c_thread_list *);
+int thread_exist(cthread_t );
 
 int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_task)(void), void *arg)
 {
@@ -56,7 +66,7 @@ int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_t
          task_end.uc_stack.ss_sp = malloc(1024);
          task_end.uc_stack.ss_size = 1024;
          getcontext(&task_end);
-         makecontext(&task_end, end_task, 0);
+         makecontext(&task_end, (void*)cthread_exit, 0, NULL);
 
          getcontext(&(thread->attr->context));
          thread->attr->context.uc_stack.ss_sp = malloc(2048);
@@ -65,10 +75,10 @@ int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_t
         
          makecontext(&(thread->attr->context),thread->task,0);
          
-         if(t_node == NULL)
+         if(ready_t_node == NULL)
             c_thread_list_init();
         
-         c_thread_list_insert(thread);
+         c_thread_list_insert(thread, ready_t_node);
     }
 
     return 0;
@@ -78,96 +88,30 @@ int cthread_scheduler()
 {
     getcontext(&scheduler_context);
 
-    /*Update thread status*/
-    update_status();
-
     switch (signals)
     {
-    case 1:
-        signals = -1;
-        reorder();
+    case YSIG:
         yield_handler();
-        break;
-    
-    case 2:
-        signals = -1;
-        join_handler();
+        signals = 0;
+        schedule();
         break;
 
-    case 3:
-        signals = -1;
+    case JSIG:
+        join_handler();
+        signals = 0;
+        schedule();
+        break;
+
+    case ESIG:
+        signals = 0;
         end_task();
 
     default:
-    scheduler_default();
+        schedule();
         break;
     }
-    
+
     return 0;
-}
-
-void update_status()
-{
-    struct c_thread_list *tmp = t_node_first;
-
-    if(tmp->next == NULL)
-        return;
-
-    while(tmp->next != NULL)
-    {
-        tmp = tmp->next;
-
-        /*Update thread status to ready if it is stopped/blocked*/
-        if(tmp->thread->attr->state == 3)
-            tmp->thread->attr->state = 1;
-
-        /* Update thread status to ready if it is interrupted by join call */
-        if(tmp->thread->attr->state == 5 && JRFLAG == 1)
-            tmp->thread->attr->state = 1;
-    }
-
-}
-
-void reorder()
-{
-    print_list();
-    struct c_thread_list *tmp = t_node;
-    struct c_thread_list *tmp2;
-
-    while (tmp->previous != t_node_first && tmp->thread != current_thread)
-        tmp = tmp->previous;
-    
-
-    if(t_node == t_node_first)
-        return;
-
-    if(tmp != t_node)
-    {
-        tmp->next->previous = tmp->previous;
-        tmp->previous->next = tmp->next;
-        tmp->previous = tmp->next;
-        
-        tmp2 = tmp->next->next;
-        tmp->next->next = tmp;
-        tmp->next = tmp2;
-        
-    }
-    else
-    {
-        tmp->previous->next = tmp->next;
-        
-        t_node_first->next->previous = tmp;
-        tmp->previous = t_node_first;
-        tmp->next = t_node_first->next;
-        t_node_first->next = tmp;
-    }
-
-    tmp = t_node_first;
-
-    while(tmp->next != NULL)
-        tmp = tmp->next;
-
-    t_node = tmp;
 }
 
 /**
@@ -183,95 +127,66 @@ void cthread_yield()
     }else if(YRFLAG == 0){
         signals = YSIG;
         setcontext(&scheduler_context);
-        
     }
+}
+
+void yield_handler()
+{
+    /* Insert thread in the ready thread queue */
+    c_thread_list_insert(current_thread, ready_t_node);
+
+    /* Change the state to running */
+    current_thread->attr->state = 1;
+
+    /* Remove thread from the running thread queue */
+    c_thread_list_remove(current_thread, running_t_node);
+
 }
 
 /**
- * @brief handle yield call
+ * @brief wait for other specified thread to finish execution
 */
-void yield_handler()
-{
-    struct c_thread_list *curr = t_node_first->next;
-
-    current_thread->attr->state = 3;
-    while(curr->next != NULL && (curr->thread->attr->state != 1))
-    {
-        curr = curr->next;
-    }
-
-    if (curr->thread->attr->state == 1)
-    {
-        YRFLAG = 1; /* Enable task to return from yield call*/
-        current_thread = curr->thread;
-
-        setcontext(&(current_thread->attr->context));
-    }
-    else
-    {
-        YRFLAG = 1; /* Enable task to return from yield call*/
-        current_thread->attr->state = 2;
-        setcontext(&(current_thread->attr->context));
-    }
-    
-}
-
 int cthread_join(cthread_t thread, void **value_ptr)
 {
-    JRFLAG = 0;
-    tJoin = thread; /*Prepare ID to be used by join handler*/
+    if(thread_exist(thread))
+        return 1;
+        
+    JRFLAG[current_thread->id] = 0;
+    tJoin[current_thread->id] = thread;
 
     if(getcontext(&(current_thread->attr->context)) != 0)
     {
         return 1;
-    }else if(JRFLAG == 0){
+    }else if(JRFLAG[current_thread->id] == 0){
         signals = JSIG;
         setcontext(&scheduler_context);       
     }
 
-    current_thread->attr->state = 2;
+    JRFLAG[current_thread->id] = 0;
 
     if(value_ptr == NULL)
         return 0;
-
-
+   
     *value_ptr = *vJoin;
-    tJoin = 0;
-    
+
     return 0;
 }
 
 void join_handler()
 {
-    struct c_thread_list *curr = t_node_first->next;
+    /* Insert thread in the blocked thread queue */
+    c_thread_list_insert(current_thread, blocked_t_node);
 
-    current_thread->attr->state = 5; /*Suspends calling thread*/
+    /* Change the state to blocked */
+    current_thread->attr->state = 3;
 
-    while(curr->next != NULL && (curr->thread->id != tJoin))
-    {
-        curr = curr->next;
-    }
-
-    if (curr->thread->attr->state == 1)
-    {
-        YRFLAG = 1; /* Enable task to return from yield call*/
-        current_thread = curr->thread;
-        current_thread->attr->state = 2;
-
-        setcontext(&(current_thread->attr->context));
-    }
-    else if(curr->thread->attr->state == 4)
-    {
-        JRFLAG = 1; /* Enable task to return from join call*/
-        printf("Target Thread has already been terminated. Returning control to the calling thread...\n");
-        current_thread->attr->state = 2;
-        setcontext(&(current_thread->attr->context));
-    }
-    else
-        setcontext(&scheduler_context);
-    
+    /* Remove thread from the running thread queue */
+    c_thread_list_remove(current_thread, running_t_node);
 }
 
+/**
+ * @brief exit and finish thread execution
+*/
 void cthread_exit(void *value_ptr)
 {
     vJoin = &value_ptr;
@@ -279,33 +194,46 @@ void cthread_exit(void *value_ptr)
     setcontext(&scheduler_context);
 }
 
-void scheduler_default()
-{
-    struct c_thread_list *curr = t_node_first->next;
+void schedule()
+{   
+    struct c_thread_list *curr = ready_t_node->next;
 
-    while(curr->next != NULL && (curr->thread->attr->state != 1))
+    if(curr == NULL)
     {
-        curr = curr->next;
-    }
-    
-    current_thread = curr->thread;
-    
-    if(current_thread->attr->state == 4)
-    {
-        printf("All tasks have finished!\n");
+        printf("All threads have finished!\n");
         return;
     }
 
-    YRFLAG = 1; /* Enable task to return from yield call*/
+    current_thread = curr->thread;
+
+    YRFLAG = 1; /* Enable task to return from yield call */
+
+    /* Change the state to running */
+    current_thread->attr->state = 2;
+
+    /* Insert thread in the running thread queue */
+    c_thread_list_insert(current_thread, running_t_node);
+
+    /* Remove thread from the ready thread queue */
+    c_thread_list_remove(current_thread, ready_t_node);
+
+    /* prepare preemption */
+    signal(SIGALRM, cthread_yield);
+    alarm(2);
+
     setcontext(&(current_thread->attr->context));
 }
 
 void end_task()
 {
-    current_thread->attr->state = 4;
+    struct c_thread_list *blockedThreads = IsBlocking(current_thread->id);
+    
+    if(blockedThreads->next != NULL)
+    {
+        unblock_threads(blockedThreads);
+    }
 
-    if(tJoin > 0)
-        JRFLAG = 1; /* Enable task to return from join call*/
+    c_thread_list_remove(current_thread, running_t_node);
 
     setcontext(&scheduler_context);
 }
@@ -318,4 +246,74 @@ void cthreads_run()
 cthread_t cthread_self()
 {
     return current_thread->id;
+}
+
+c_thread *find_thread(cthread_t id, struct c_thread_list *t_node)
+{
+    struct c_thread_list  *tmp = t_node->next;
+
+    while(tmp != NULL && id != tmp->thread->id)
+        tmp = tmp->next;
+
+    if(tmp == NULL)
+        return NULL;
+    
+    return tmp->thread;
+}
+
+struct c_thread_list *IsBlocking(cthread_t id)
+{
+    int x = 1;
+    
+    struct c_thread_list *b_threads = (struct c_thread_list*)malloc(sizeof(struct c_thread_list));
+    b_threads->next = NULL;
+    b_threads->previous = NULL;
+    b_threads->thread = NULL;
+
+    while(x < TJOIN_SIZE)
+    {
+        if(id == tJoin[x])
+        {
+            c_thread_list_insert(find_thread(x,blocked_t_node),b_threads);
+        }   
+        x++;
+    }
+    return b_threads;
+}
+
+void unblock_threads(struct c_thread_list *b_threads)
+{
+    struct c_thread_list *tmp = b_threads->next;
+
+    while(tmp != NULL)
+    {
+        JRFLAG[tmp->thread->id] = 1; /* Enable task to return from join call*/
+
+        /* Insert thread in the ready thread queue */
+        c_thread_list_insert(tmp->thread, ready_t_node);
+        
+        /* Change the state to ready */
+        tmp->thread->attr->state = 1;
+        
+        /* Remove thread from the blocked thread queue */
+        c_thread_list_remove(tmp->thread, blocked_t_node);
+        
+        tmp = tmp->next;    
+    } 
+}
+
+int thread_exist(cthread_t id)
+{
+    if(find_thread(id, ready_t_node) == NULL)
+    {
+        if(find_thread(id, running_t_node) == NULL)
+        {
+            if(find_thread(id, blocked_t_node) == NULL)
+                return 1;
+        }
+        else
+            return 0;
+    }
+
+    return 0;
 }

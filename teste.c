@@ -12,27 +12,31 @@ void ping()
         printf("Thread %d: PING!\n", cthread_self());
         sleep(2);
         x++;
-        cthread_yield();
+        //printf("valor de x: %d\n", x);
+        //cthread_yield();
+        if(x == 3)
+            cthread_exit(&ret);
         printf("Thread %d returned from previous stop!\n", cthread_self());
     }
 
-    cthread_exit(&ret);
+    //cthread_exit(&ret);
 }
 
 void pong()
 {
-    int *ptr[0];
+    int *ptr[1];
 
     while(1)
     {
         printf("Thread %d: PONG!\n", cthread_self());
         sleep(2);
-        cthread_yield();
+        //cthread_yield();
         printf("Thread %d returned from previous stop!\n", cthread_self());
-        cthread_join(1, (void**)&ptr[0]);
-
-        if(*ptr != NULL)
-            printf("Retorno da outra task é %d\n",*ptr[0]);
+        cthread_join(1,(void**)(ptr+1));
+        
+        if(*(ptr+1) != NULL)
+            printf("Retorno da outra task é %d\n",**(ptr+1));
+            
     }
 }
 
