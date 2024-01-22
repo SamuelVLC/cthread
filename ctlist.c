@@ -58,7 +58,7 @@ int c_thread_list_remove(c_thread *thread, struct c_thread_list *t_node)
 {
     struct c_thread_list *curr = t_node->next;
 
-    while (curr->thread != thread && curr->next != NULL)
+    while (curr != NULL && curr->thread != thread)
     {
         curr = curr->next;
     }

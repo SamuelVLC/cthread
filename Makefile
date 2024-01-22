@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Werror -fPIC -g  # Add the -g flag for debugging
+CFLAGS = -Wall -fPIC -g -Wextra -pedantic  # Add extra warning flags
 LDFLAGS = -shared
 
 LIB_NAME = lib.so

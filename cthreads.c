@@ -9,14 +9,17 @@
  * Constant definitions
 */
 #define TJOIN_SIZE 1000
+#define YIELD_SIZE 1000
 
 /**
  * Global variable definitions
 */
 cthread_t tid = 0; /*Static thread ID Definition*/
-int tJoin[TJOIN_SIZE];
+struct sigaction sa;
+unsigned int tJoin[TJOIN_SIZE];
 void **vJoin = NULL; /*Join handler global value_ptr*/
 ucontext_t scheduler_context;
+ucontext_t schedule_context;
 ucontext_t task_end; /*Defines context to end a task*/
 c_thread *current_thread; /*Thread in Execution*/
 
@@ -26,13 +29,14 @@ c_thread *current_thread; /*Thread in Execution*/
 #define YSIG 1 /*Yield signal*/
 #define JSIG 2 /*Join signal*/
 #define ESIG 3 /*Exit signal*/
+#define SYSIG 4 /*System yield signal*/
 int signals;
 
 /**
  * Flag definitions
 */
 int YRFLAG; /*Scheduler flag to yield*/
-int JRFLAG[TJOIN_SIZE]; /*Scheduler flag to join*/
+int *JRFLAG = NULL; /*Scheduler flag to join*/
 
 /*Forward definitions*/
 void schedule();
@@ -45,6 +49,8 @@ c_thread *find_thread(cthread_t, struct c_thread_list *);
 struct c_thread_list *IsBlocking(cthread_t );
 void unblock_threads(struct c_thread_list *);
 int thread_exist(cthread_t );
+void exit_handler();
+void clear_memory();
 
 int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_task)(void), void *arg)
 {
@@ -63,10 +69,10 @@ int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_t
          thread->id = tid;
          *t = thread->id;
          
-         task_end.uc_stack.ss_sp = malloc(1024);
-         task_end.uc_stack.ss_size = 1024;
+         task_end.uc_stack.ss_sp = malloc(2048);
+         task_end.uc_stack.ss_size = 2048;
          getcontext(&task_end);
-         makecontext(&task_end, (void*)cthread_exit, 0, NULL);
+         makecontext(&task_end, exit_handler, 0);
 
          getcontext(&(thread->attr->context));
          thread->attr->context.uc_stack.ss_sp = malloc(2048);
@@ -79,8 +85,8 @@ int Cthread_create(cthread_t *t, const struct c_thread_attr *attr, void(*start_t
             c_thread_list_init();
         
          c_thread_list_insert(thread, ready_t_node);
-    }
 
+    }
     return 0;
 }
 
@@ -91,20 +97,21 @@ int cthread_scheduler()
     switch (signals)
     {
     case YSIG:
-        yield_handler();
         signals = 0;
+        yield_handler();
         schedule();
         break;
 
     case JSIG:
-        join_handler();
         signals = 0;
+        join_handler();
         schedule();
         break;
 
     case ESIG:
         signals = 0;
         end_task();
+        break;
 
     default:
         schedule();
@@ -118,13 +125,15 @@ int cthread_scheduler()
  * @brief yields the thread
 */
 void cthread_yield()
-{
+{   
+    alarm(0);
     YRFLAG = 0;
 
     if(getcontext(&(current_thread->attr->context)) != 0)
     {
         return;
     }else if(YRFLAG == 0){
+        //printf("AQUI\n");
         signals = YSIG;
         setcontext(&scheduler_context);
     }
@@ -134,13 +143,12 @@ void yield_handler()
 {
     /* Insert thread in the ready thread queue */
     c_thread_list_insert(current_thread, ready_t_node);
-
-    /* Change the state to running */
+    
+    /* Change the state to ready */
     current_thread->attr->state = 1;
 
     /* Remove thread from the running thread queue */
     c_thread_list_remove(current_thread, running_t_node);
-
 }
 
 /**
@@ -149,8 +157,11 @@ void yield_handler()
 int cthread_join(cthread_t thread, void **value_ptr)
 {
     if(thread_exist(thread))
+    {
+        *value_ptr = NULL;
         return 1;
-        
+    }
+    
     JRFLAG[current_thread->id] = 0;
     tJoin[current_thread->id] = thread;
 
@@ -166,14 +177,19 @@ int cthread_join(cthread_t thread, void **value_ptr)
 
     if(value_ptr == NULL)
         return 0;
-   
-    *value_ptr = *vJoin;
+    
+    *value_ptr = *(vJoin + current_thread->id);
+    tJoin[current_thread->id] = 0;
 
     return 0;
 }
 
 void join_handler()
 {
+    /* Prepare array of return values for join*/
+    if(vJoin == NULL)
+        vJoin = (void**)calloc(TJOIN_SIZE, sizeof(void*));
+
     /* Insert thread in the blocked thread queue */
     c_thread_list_insert(current_thread, blocked_t_node);
 
@@ -194,32 +210,47 @@ void cthread_exit(void *value_ptr)
     setcontext(&scheduler_context);
 }
 
+void exit_handler()
+{
+    alarm(0);
+    signals = ESIG;
+    setcontext(&scheduler_context);
+}
+
 void schedule()
 {   
     struct c_thread_list *curr = ready_t_node->next;
-
     if(curr == NULL)
     {
         printf("All threads have finished!\n");
+
+        /*free memory*/
+        clear_memory();
+
         return;
     }
 
     current_thread = curr->thread;
 
-    YRFLAG = 1; /* Enable task to return from yield call */
-
-    /* Change the state to running */
-    current_thread->attr->state = 2;
-
     /* Insert thread in the running thread queue */
     c_thread_list_insert(current_thread, running_t_node);
+        
+    /* Change the state to running */
+    current_thread->attr->state = 2;
 
     /* Remove thread from the ready thread queue */
     c_thread_list_remove(current_thread, ready_t_node);
 
     /* prepare preemption */
+    //sa.sa_handler = cthread_yield;
+    //sigaction(SIGALRM, &sa, NULL);
     signal(SIGALRM, cthread_yield);
-    alarm(2);
+    alarm(1);
+    
+    YRFLAG = 1; /* Enable task to return from yield call */
+
+    if (current_thread->attr->context.uc_stack.ss_sp == NULL)
+        printf("context is null. cannot executed\n");
 
     setcontext(&(current_thread->attr->context));
 }
@@ -240,6 +271,10 @@ void end_task()
 
 void cthreads_run()
 {
+    /* Initialize FLAGS*/
+    JRFLAG = (int*)malloc(TJOIN_SIZE*sizeof(int));
+
+    /*Initialize scheduler*/
     cthread_scheduler();
 }
 
@@ -298,6 +333,8 @@ void unblock_threads(struct c_thread_list *b_threads)
         /* Remove thread from the blocked thread queue */
         c_thread_list_remove(tmp->thread, blocked_t_node);
         
+        *(vJoin + tmp->thread->id) = *vJoin;
+
         tmp = tmp->next;    
     } 
 }
@@ -316,4 +353,13 @@ int thread_exist(cthread_t id)
     }
 
     return 0;
+}
+
+void clear_memory()
+{
+    free(JRFLAG);
+
+    free(blocked_t_node);
+    free(ready_t_node);
+    free(running_t_node);
 }

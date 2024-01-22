@@ -1,41 +1,40 @@
 #include "cthreads.h"
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
+
+FILE *file; 
 
 void ping()
 {
     int x = 0;
     int ret = 200;
+    cthread_t id;
 
     while(x < 5)
     {
         printf("Thread %d: PING!\n", cthread_self());
-        sleep(2);
         x++;
-        //printf("valor de x: %d\n", x);
-        //cthread_yield();
-        if(x == 3)
-            cthread_exit(&ret);
+        sleep(1);
         printf("Thread %d returned from previous stop!\n", cthread_self());
     }
-
-    //cthread_exit(&ret);
+    Cthread_create(&id, NULL, ping, NULL);
+    //printf("oi saindo\n");
+    cthread_exit(&ret);
 }
 
 void pong()
 {
-    int *ptr[1];
-
+    int *ptr[2];    
     while(1)
     {
         printf("Thread %d: PONG!\n", cthread_self());
-        sleep(2);
-        //cthread_yield();
+        sleep(1);
         printf("Thread %d returned from previous stop!\n", cthread_self());
         cthread_join(1,(void**)(ptr+1));
         
         if(*(ptr+1) != NULL)
-            printf("Retorno da outra task é %d\n",**(ptr+1));
+            printf("Retorno da outra task é %d\n",*ptr[1]);
             
     }
 }
@@ -44,6 +43,8 @@ int main()
 {
     cthread_t id;
     int x = 0;
+    //file = fopen("testeOutput.txt", "w");
+    
     while (id < 2)
     {
         x++;
