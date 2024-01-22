@@ -1,2 +1,2 @@
 # cthread
-This is a user-space cooperative threading library
+This is a user-space preemptive threading library
